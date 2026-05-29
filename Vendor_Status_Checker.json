@@ -1,0 +1,802 @@
+{
+  "id": "ujozZtSU9F29yBfA",
+  "name": "Vendor Status Checker",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "08b29970-28c9-456d-8031-6c4630491fba",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2080,
+        304
+      ],
+      "webhookId": "42c06f6f-9ef6-4af9-b233-9e1bb1166f84"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "17M1vyHJFf18t3mM5Dp68pluFR5s8PijtnS-2QHiC3pQ",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 26812368,
+          "mode": "list",
+          "cachedResultName": "Config",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17M1vyHJFf18t3mM5Dp68pluFR5s8PijtnS-2QHiC3pQ/edit#gid=26812368"
+        },
+        "options": {}
+      },
+      "id": "2f6a8616-30a7-45c7-9501-f2d1f2c4cff0",
+      "name": "Read Config",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1824,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $input.first().json;\nconst msg = $('Telegram Trigger').first().json.message;\nconst chatId = msg.chat.id;\nconst msgText = (msg.text || '').trim();\n\n// Get today's date in Central Time (YYYY-MM-DD)\nconst now = new Date();\nconst today = now.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });\n\n// Handle empty message\nif (!msgText) {\n  return [{\n    json: {\n      chatId,\n      action: 'empty',\n      replyText: 'Please send a vendor name (e.g., \"Costco\", \"Target\", \"Walgreens\").'\n    }\n  }];\n}\n\nconst defaultCity = (config.DefaultCity || '').trim();\nconst lastCheck = (config.LastCityCheck || '').trim();\nconst todayCity = (config.TodayCity || '').trim();\nconst pendingVendor = (config.PendingVendor || '').trim();\nconst pendingDate = (config.PendingDate || '').trim();\n\n// Case 1: City already confirmed today\nif (lastCheck === today && todayCity) {\n  return [{\n    json: {\n      chatId,\n      action: 'ready',\n      searchName: msgText,\n      dailyCity: todayCity\n    }\n  }];\n}\n\n// Case 2: There is a pending vendor query for today - this message is the city reply\nif (pendingVendor && pendingDate === today) {\n  const cityReply = (msgText.toLowerCase() === 'yes') ? defaultCity : msgText;\n  return [{\n    json: {\n      chatId,\n      action: 'city_reply',\n      searchName: pendingVendor,\n      dailyCity: cityReply,\n      today: today\n    }\n  }];\n}\n\n// Case 3: First query of the day - need to ask for city\nreturn [{\n  json: {\n    chatId,\n    action: 'need_city',\n    searchName: msgText,\n    defaultCity: defaultCity,\n    today: today,\n    replyText: `\\ud83d\\udccd Are you in *${defaultCity}* today?\\n\\nReply *yes* to confirm, or send a different city (e.g., \"Dallas, TX\").`\n  }\n}];"
+      },
+      "id": "8a0fb8fe-fb1c-488f-979f-1ce1bab84fae",
+      "name": "Check Daily State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1568,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "ready",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Ready"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "city_reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "City Reply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "need_city",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Need City"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "1505d851-5cc4-4a0e-820f-4972b3eb0f64",
+      "name": "Route Daily State",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -1296,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/17M1vyHJFf18t3mM5Dp68pluFR5s8PijtnS-2QHiC3pQ/values/Config!B2:F2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: [[$json.dailyCity, $json.today, '', '', '']] }) }}",
+        "options": {}
+      },
+      "id": "b48599f8-c232-4930-a7e4-0a529bc5c97f",
+      "name": "Save City Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1040,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/17M1vyHJFf18t3mM5Dp68pluFR5s8PijtnS-2QHiC3pQ/values/Config!D2:F2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: [[$json.searchName, String($json.chatId), $json.today]] }) }}",
+        "options": {}
+      },
+      "id": "a4e9e948-f7c1-44c1-9872-f3735d16f670",
+      "name": "Save Pending Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1040,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Check Daily State').first().json.chatId }}",
+        "text": "={{ $('Check Daily State').first().json.replyText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "97c3060f-c007-4e29-af48-a09e4cc33ac4",
+      "name": "Ask City",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -784,
+        448
+      ],
+      "webhookId": "c7ae9d4c-496d-4d13-af5d-7bb8b1dec3b8"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "17M1vyHJFf18t3mM5Dp68pluFR5s8PijtnS-2QHiC3pQ",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Vendors",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/17M1vyHJFf18t3mM5Dp68pluFR5s8PijtnS-2QHiC3pQ/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "7f0b4759-0d1a-48d4-8af8-9bd9beeb9356",
+      "name": "Read Vendor Schedule",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -784,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst dailyState = $('Check Daily State').first().json;\nconst chatId = dailyState.chatId;\nconst searchName = dailyState.searchName;\nconst dailyCity = dailyState.dailyCity;\n\n// Validate input (safety net - should be caught earlier by Check Daily State)\nif (!searchName) {\n  return [{\n    json: {\n      chatId,\n      status: 'empty',\n      searchName: '',\n      replyText: 'Please send a vendor name (e.g., \"Costco\", \"Target\", \"Walgreens\").'\n    }\n  }];\n}\n\n// Search for vendor (case-insensitive)\nlet vendor = null;\nfor (const item of items) {\n  const row = item.json;\n  if (row.Vendor && row.Vendor.toLowerCase() === searchName.toLowerCase()) {\n    vendor = row;\n    break;\n  }\n}\n\nif (vendor) {\n  return [{\n    json: {\n      chatId,\n      status: 'found',\n      searchName,\n      vendor\n    }\n  }];\n}\n\n// Vendor not found - needs web search\nreturn [{\n  json: {\n    chatId,\n    status: 'not_found',\n    searchName,\n    defaultCity: dailyCity\n  }\n}];"
+      },
+      "id": "f6890724-03df-4ec7-a941-4745cfd1e82c",
+      "name": "Check Vendor Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "found",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Found"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "not_found",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Search"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "aca924df-d18e-43d6-a480-b7c51d7ce440",
+      "name": "Route Vendor",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -256,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst chatId = data.chatId;\nconst vendor = data.vendor;\nconst isNewVendor = data.isNewVendor || false;\n\n// --- Timezone handling: America/Chicago ---\nconst now = new Date();\n\nconst centralHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }));\nconst centralMinute = parseInt(now.toLocaleString('en-US', { timeZone: 'America/Chicago', minute: 'numeric' }));\nconst currentTimeStr = `${String(centralHour).padStart(2, '0')}:${String(centralMinute).padStart(2, '0')}`;\n\nconst centralDayOfWeek = new Date(\n  now.toLocaleString('en-US', { timeZone: 'America/Chicago' })\n).getDay();\n\nconst dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];\nconst dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\n\nfunction timeToMinutes(timeStr) {\n  const parts = timeStr.trim().split(':');\n  return parseInt(parts[0]) * 60 + parseInt(parts[1]);\n}\n\nfunction formatTime12(timeStr) {\n  const parts = timeStr.trim().split(':');\n  let h = parseInt(parts[0]);\n  const m = parts[1];\n  const ampm = h >= 12 ? 'PM' : 'AM';\n  if (h === 0) h = 12;\n  else if (h > 12) h -= 12;\n  return `${h}:${m} ${ampm}`;\n}\n\nfunction parseRanges(dayStr) {\n  if (!dayStr || dayStr.trim().toLowerCase() === 'closed') return [];\n  return dayStr.split(',').map(range => {\n    const parts = range.trim().split('-');\n    return { open: parts[0].trim(), close: parts[1].trim() };\n  });\n}\n\nfunction formatDayRanges(dayStr) {\n  if (!dayStr || dayStr.trim().toLowerCase() === 'closed') return 'Closed';\n  const ranges = parseRanges(dayStr);\n  return ranges.map(r => `${formatTime12(r.open)} - ${formatTime12(r.close)}`).join(', ');\n}\n\nfunction getDaySchedule(dayIndex) {\n  const key = dayKeys[dayIndex];\n  return (vendor[key] || '').trim();\n}\n\nconst currentMinutes = timeToMinutes(currentTimeStr);\nconst todayStr = getDaySchedule(centralDayOfWeek);\nconst todayRanges = parseRanges(todayStr);\nconst todayName = dayNames[centralDayOfWeek];\n\nlet isOpenNow = false;\nlet currentRangeClose = null;\nlet nextRangeToday = null;\nlet statusText = '';\n\nfor (let i = 0; i < todayRanges.length; i++) {\n  const range = todayRanges[i];\n  const openMin = timeToMinutes(range.open);\n  const closeMin = timeToMinutes(range.close);\n  if (currentMinutes >= openMin && currentMinutes < closeMin) {\n    isOpenNow = true;\n    currentRangeClose = range.close;\n    if (i + 1 < todayRanges.length) {\n      nextRangeToday = todayRanges[i + 1];\n    }\n    break;\n  }\n  if (currentMinutes < openMin && !nextRangeToday) {\n    nextRangeToday = range;\n  }\n}\n\nif (todayRanges.length === 0) {\n  statusText = `${vendor.Vendor} is *closed* all day today (${todayName}).`;\n} else if (isOpenNow) {\n  const closeMin = timeToMinutes(currentRangeClose);\n  const minutesLeft = closeMin - currentMinutes;\n  const hoursLeft = Math.floor(minutesLeft / 60);\n  const minsLeft = minutesLeft % 60;\n  let closesInStr = '';\n  if (hoursLeft > 0 && minsLeft > 0) closesInStr = `${hoursLeft}h ${minsLeft}m`;\n  else if (hoursLeft > 0) closesInStr = `${hoursLeft}h`;\n  else closesInStr = `${minsLeft}m`;\n  statusText = `${vendor.Vendor} is *open* right now! Closes in ${closesInStr} (at ${formatTime12(currentRangeClose)}).`;\n  if (nextRangeToday) {\n    statusText += ` Opens again at ${formatTime12(nextRangeToday.open)}.`;\n  }\n} else if (nextRangeToday) {\n  const firstOpen = todayRanges[0];\n  if (currentMinutes < timeToMinutes(firstOpen.open)) {\n    statusText = `${vendor.Vendor} is *closed* right now. Opens today at ${formatTime12(nextRangeToday.open)}.`;\n  } else {\n    statusText = `${vendor.Vendor} is *closed* right now (on break). Opens again at ${formatTime12(nextRangeToday.open)}.`;\n  }\n} else {\n  statusText = `${vendor.Vendor} is *closed* for today. Closed at ${formatTime12(todayRanges[todayRanges.length - 1].close)}.`;\n}\n\nlet nextOpenLine = '';\nif (!isOpenNow) {\n  if (nextRangeToday) {\n    nextOpenLine = `Next open: Today (${todayName}) at ${formatTime12(nextRangeToday.open)}`;\n  } else {\n    for (let offset = 1; offset <= 7; offset++) {\n      const checkDayIndex = (centralDayOfWeek + offset) % 7;\n      const checkStr = getDaySchedule(checkDayIndex);\n      const checkRanges = parseRanges(checkStr);\n      if (checkRanges.length > 0) {\n        nextOpenLine = `Next open: ${dayNames[checkDayIndex]} at ${formatTime12(checkRanges[0].open)}`;\n        break;\n      }\n    }\n  }\n  if (!nextOpenLine) {\n    nextOpenLine = 'This vendor appears to have no open hours scheduled.';\n  }\n}\n\nlet weeklySchedule = '';\nfor (let d = 0; d < 7; d++) {\n  const dayStr = getDaySchedule(d);\n  const marker = (d === centralDayOfWeek) ? ' (today)' : '';\n  weeklySchedule += `  ${dayNames[d]}${marker}: ${formatDayRanges(dayStr)}\\n`;\n}\n\nconst openIcon = isOpenNow ? '\\u2705' : '\\u274C';\nconst statusLabel = isOpenNow ? 'OPEN' : 'CLOSED';\nlet replyText = `${openIcon} *${vendor.Vendor}* - ${statusLabel}\\n\\n`;\nreplyText += `${statusText}\\n\\n`;\nreplyText += `*Today (${todayName}):* ${formatDayRanges(todayStr)}\\n`;\nif (nextOpenLine) replyText += `${nextOpenLine}\\n`;\n\nif (vendor.Location) {\n  replyText += `\\n\\ud83d\\udccd ${vendor.Location}\\n`;\n}\n\nreplyText += `\\n*Weekly Hours:*\\n${weeklySchedule}`;\n\nconst timeNowFormatted = formatTime12(currentTimeStr);\nreplyText += `\\n_Checked at ${timeNowFormatted} CT_`;\n\nif (isNewVendor) {\n  replyText += '\\n\\n\\ud83d\\udcdd New vendor! Added to database for faster future lookups.';\n}\n\nreturn [{ json: { chatId, replyText } }];"
+      },
+      "id": "86f6e10b-c760-4047-aef6-556220588d3d",
+      "name": "Format Status Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.replyText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "a126d090-15e2-42b0-a9a2-c34fe5214c8c",
+      "name": "Reply Vendor Status",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        256,
+        0
+      ],
+      "webhookId": "95079126-87af-4742-9e9e-6db904c858dd"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Search for the current business hours of \"{{ $json.searchName }}\" in {{ $json.defaultCity }}.\n\nReturn ONLY a valid JSON object in this exact format with no other text, no markdown, no code fences:\n{\"vendor\":\"Official Vendor Name\",\"location\":\"{{ $json.defaultCity }}\",\"Mon\":\"HH:MM-HH:MM\",\"Tue\":\"HH:MM-HH:MM\",\"Wed\":\"HH:MM-HH:MM\",\"Thu\":\"HH:MM-HH:MM\",\"Fri\":\"HH:MM-HH:MM\",\"Sat\":\"HH:MM-HH:MM\",\"Sun\":\"HH:MM-HH:MM\"}\n\nRules:\n- Use 24-hour time format (e.g., 09:00, 17:30, 22:00)\n- Each day's value is one or more time ranges in \"HH:MM-HH:MM\" format\n- If the vendor has a break in the middle of the day (e.g., closes for lunch then reopens for dinner), list all ranges separated by a comma and space: \"11:00-14:00, 17:00-22:00\"\n- Use \"Closed\" if the vendor is closed that day\n- Search specifically for the location in {{ $json.defaultCity }}\n- If you cannot find hours, return: {\"error\":\"not_found\"}\n- CRITICAL: Return ONLY the JSON object, nothing else",
+        "options": {
+          "systemMessage": "You are a business hours lookup assistant. Search for store/business hours at a specific location and return them as structured JSON data. Always use 24-hour time format. If a vendor has split hours (e.g., lunch break), include all time ranges for that day separated by commas. Be precise and only return verified hours for the requested location."
+        }
+      },
+      "id": "c0f05e10-39b3-4402-b4a7-2255b884c5b1",
+      "name": "AI Search Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        0,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "c7fc76ad-59b6-4c7c-aeed-62a42c7479b4",
+      "name": "SerpAPI Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "typeVersion": 1,
+      "position": [
+        160,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiOutput = $input.first().json.output || '';\nconst chatId = $('Check Vendor Status').first().json.chatId;\nconst searchName = $('Check Vendor Status').first().json.searchName;\nconst defaultCity = $('Check Vendor Status').first().json.defaultCity || '';\n\nlet schedule = null;\ntry {\n  schedule = JSON.parse(aiOutput);\n} catch (e) {\n  const jsonMatch = aiOutput.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    try {\n      schedule = JSON.parse(jsonMatch[0]);\n    } catch (e2) {\n      schedule = null;\n    }\n  }\n}\n\nif (!schedule || schedule.error === 'not_found' || !schedule.vendor) {\n  return [{\n    json: {\n      chatId,\n      aiFound: false,\n      replyText: `\\u274C Could not find business hours for \"${searchName}\"${defaultCity ? ' in ' + defaultCity : ''}.\\n\\nTry using the vendor's official name (e.g., \"Walgreens\", \"Target\", \"Costco\").`\n    }\n  }];\n}\n\nconst location = schedule.location || defaultCity;\n\nconst vendor = {\n  Vendor: schedule.vendor,\n  Location: location,\n  Mon: schedule.Mon || 'Closed',\n  Tue: schedule.Tue || 'Closed',\n  Wed: schedule.Wed || 'Closed',\n  Thu: schedule.Thu || 'Closed',\n  Fri: schedule.Fri || 'Closed',\n  Sat: schedule.Sat || 'Closed',\n  Sun: schedule.Sun || 'Closed'\n};\n\nconst sheetRow = [\n  vendor.Vendor,\n  vendor.Location,\n  vendor.Mon,\n  vendor.Tue,\n  vendor.Wed,\n  vendor.Thu,\n  vendor.Fri,\n  vendor.Sat,\n  vendor.Sun\n];\n\nreturn [{\n  json: {\n    chatId,\n    aiFound: true,\n    isNewVendor: true,\n    vendor,\n    sheetRow\n  }\n}];"
+      },
+      "id": "4fb536f3-dd22-43d4-83d1-05dfe0633a06",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "condition-ai-found",
+              "leftValue": "={{ $json.aiFound }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3a462cfe-e1dc-4a0d-9551-48178d6e6507",
+      "name": "AI Found Hours?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        512,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/17M1vyHJFf18t3mM5Dp68pluFR5s8PijtnS-2QHiC3pQ/values/Vendors!A1:append",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "USER_ENTERED"
+            },
+            {
+              "name": "insertDataOption",
+              "value": "INSERT_ROWS"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: [$json.sheetRow] }) }}",
+        "options": {}
+      },
+      "id": "6e141378-f515-43b9-9d7c-21264167ce76",
+      "name": "Save to Google Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        784,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Parse AI Response').first().json;\nreturn [{\n  json: {\n    chatId: data.chatId,\n    isNewVendor: true,\n    vendor: data.vendor\n  }\n}];"
+      },
+      "id": "3040f0de-794b-47e7-a9fc-0c7ac1605a02",
+      "name": "Prepare for Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.replyText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "ed799b98-96a1-4676-b615-84b9308f5b29",
+      "name": "Reply Search Failed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        784,
+        336
+      ],
+      "webhookId": "1a5889f4-832d-4d8d-9dee-ea970617f221"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.replyText }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "36309950-9976-43bf-a6ef-ab3e0197c657",
+      "name": "Reply Empty Input",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1040,
+        640
+      ],
+      "webhookId": "7d249aa0-2c7d-4f30-9da9-07ea86ab2558"
+    },
+    {
+      "parameters": {
+        "content": "## \ud83d\udcca Vendor Status Checker v2\n\nSend a vendor name via Telegram to check if they are currently open or closed.\n\n**Daily city check**: On your first query each day, the bot asks if you're still in your default city. Your reply is used for all searches that day.\n\n**Supports split schedules** (e.g., lunch break: 11:00-14:00, 17:00-22:00)\n\n**Sheet tabs:**\n- **Vendors** (9 cols): Vendor | Location | Mon | Tue | Wed | Thu | Fri | Sat | Sun\n- **Config** (6 cols): DefaultCity | TodayCity | LastCityCheck | PendingVendor | PendingChatId | PendingDate\n\n**Credentials needed:** Telegram Bot, Google Sheets, OpenAI, SerpAPI",
+        "height": 340,
+        "width": 540,
+        "color": 4
+      },
+      "id": "157f87ac-a9fb-44ef-966a-bdb82aaad50c",
+      "name": "Note Info",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2480,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## \u26a0\ufe0f Configuration Required\n\n1. Replace `YOUR_GOOGLE_SHEET_ID` in all Google Sheets + HTTP Request nodes (5 nodes)\n2. Create Google Sheet with two tabs:\n   - **Vendors**: 9 columns (Vendor | Location | Mon-Sun)\n   - **Config**: 6 columns with one data row (set DefaultCity to your city)\n3. Connect credentials: Telegram Bot, Google Sheets OAuth2, OpenAI, SerpAPI\n\nSee SETUP.md for full instructions.",
+        "height": 240,
+        "width": 540,
+        "color": 6
+      },
+      "id": "4d426310-f3eb-4813-af99-f36c787932e7",
+      "name": "Note Config",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2480,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        448
+      ],
+      "id": "ae96c5ff-1867-4ef5-a255-43a978b0e875",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "zvSq7cycEQeCtyTM",
+          "name": "Ollama account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config": {
+      "main": [
+        [
+          {
+            "node": "Check Daily State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Daily State": {
+      "main": [
+        [
+          {
+            "node": "Route Daily State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Daily State": {
+      "main": [
+        [
+          {
+            "node": "Read Vendor Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save City Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Pending Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Empty Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save City Config": {
+      "main": [
+        [
+          {
+            "node": "Read Vendor Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Pending Config": {
+      "main": [
+        [
+          {
+            "node": "Ask City",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Vendor Schedule": {
+      "main": [
+        [
+          {
+            "node": "Check Vendor Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Vendor Status": {
+      "main": [
+        [
+          {
+            "node": "Route Vendor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Vendor": {
+      "main": [
+        [
+          {
+            "node": "Format Status Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Search Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Empty Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Status Reply": {
+      "main": [
+        [
+          {
+            "node": "Reply Vendor Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Search Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Search Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "AI Found Hours?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Found Hours?": {
+      "main": [
+        [
+          {
+            "node": "Save to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Search Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Format": {
+      "main": [
+        [
+          {
+            "node": "Format Status Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Search Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "active": false,
+  "createdAt": "2026-02-28 15:48:25.665",
+  "updatedAt": "2026-03-03 20:50:27.083"
+}

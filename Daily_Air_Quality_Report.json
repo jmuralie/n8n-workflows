@@ -1,0 +1,173 @@
+{
+  "id": "airquality-bot-v2",
+  "name": "Air Quality Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "38f50c60-48f8-49e0-bad3-76896bc93aa3",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 192]
+    },
+    {
+      "parameters": {
+        "url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "latitude",
+              "value": "35.6528"
+            },
+            {
+              "name": "longitude",
+              "value": "-97.4781"
+            },
+            {
+              "name": "current",
+              "value": "us_aqi,pm10,pm2_5,ozone,dust"
+            },
+            {
+              "name": "timezone",
+              "value": "America/Chicago"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "03ac1d88-9777-4a5f-be88-e9681eed24e0",
+      "name": "Fetch Air Quality",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 192]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ambeedata.com/latest/pollen/by-lat-lng",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "lat",
+              "value": "35.6528"
+            },
+            {
+              "name": "lng",
+              "value": "-97.4781"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_AMBEE_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b7e3f21a-5c4d-4e8b-9f1a-2d6c8a0e3b5d",
+      "name": "Fetch Pollen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 192]
+    },
+    {
+      "parameters": {
+        "jsCode": "const aq = $('Fetch Air Quality').first().json;\nconst pollen = $input.first().json;\nconst chatId = '8113726432';\nconst c = aq.current;\nconst p = pollen.data && pollen.data[0];\n\nconst aqiLabel = (v) => {\n  if (v <= 50)  return '\ud83d\udfe2 Good';\n  if (v <= 100) return '\ud83d\udfe1 Moderate';\n  if (v <= 150) return '\ud83d\udfe0 Unhealthy for sensitive groups';\n  if (v <= 200) return '\ud83d\udd34 Unhealthy';\n  if (v <= 300) return '\ud83d\udfe3 Very Unhealthy';\n  return '\u26ab Hazardous';\n};\n\nconst ozoneLabel = (v) => {\n  if (v < 60)  return '\ud83d\udfe2 Low';\n  if (v < 100) return '\ud83d\udfe1 Moderate';\n  if (v < 140) return '\ud83d\udfe0 High';\n  return '\ud83d\udd34 Very High';\n};\n\nconst dustLabel = (v) => {\n  if (v < 25)  return '\ud83d\udfe2 Low';\n  if (v < 50)  return '\ud83d\udfe1 Moderate';\n  if (v < 100) return '\ud83d\udfe0 High';\n  return '\ud83d\udd34 Very High';\n};\n\nconst pollenRiskEmoji = (risk) => {\n  const map = { 'Low': '\ud83d\udfe2', 'Moderate': '\ud83d\udfe1', 'High': '\ud83d\udfe0', 'Very High': '\ud83d\udd34' };\n  return (map[risk] || '\u26aa') + ' ' + (risk || 'N/A');\n};\n\nconst today = new Date().toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'America/Chicago'\n});\n\nconst pollenSection = p\n  ? `\n\n\ud83c\udf3f <b>Pollen Report</b>\n\ud83c\udf33 <b>Tree:</b> ${pollenRiskEmoji(p.Risk.tree_pollen)} (${p.Count.tree_pollen} grains/m\u00b3)\n\ud83c\udf3e <b>Grass:</b> ${pollenRiskEmoji(p.Risk.grass_pollen)} (${p.Count.grass_pollen} grains/m\u00b3)\n\ud83c\udf31 <b>Weed:</b> ${pollenRiskEmoji(p.Risk.weed_pollen)} (${p.Count.weed_pollen} grains/m\u00b3)`\n  : '\\n\\n\u26a0\ufe0f <b>Pollen data unavailable</b>';\n\nconst msg = `\ud83c\udf24 <b>Air Quality Report \u2014 ${today}</b>\n\n\ud83c\udf0d <b>Overall AQI:</b> ${c.us_aqi} \u2014 ${aqiLabel(c.us_aqi)}\n\ud83c\udf2b <b>PM10 (Dust):</b> ${c.pm10} \u00b5g/m\u00b3 \u2014 ${dustLabel(c.pm10)}\n\ud83d\udca8 <b>PM2.5 (Fine particles):</b> ${c.pm2_5} \u00b5g/m\u00b3\n\ud83e\uddea <b>Ozone:</b> ${c.ozone} \u00b5g/m\u00b3 \u2014 ${ozoneLabel(c.ozone)}\n\ud83c\udfdc <b>Dust:</b> ${c.dust} \u00b5g/m\u00b3 \u2014 ${dustLabel(c.dust)}${pollenSection}`;\n\nreturn [{ json: { message: msg, chatId } }];"
+      },
+      "id": "44b28590-1023-49e3-ac2a-9c168aea9d4f",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 192]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "48e124ea-18d2-4702-924f-6830375dc9db",
+      "name": "Send Telegram Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1200, 192],
+      "credentials": {
+        "telegramApi": {
+          "id": "DvwBL0I3TNJNTrni",
+          "name": "MJ_outdoor"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Air Quality",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Air Quality": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pollen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pollen": {
+      "main": [
+        [
+          {
+            "node": "Format Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "active": false,
+  "createdAt": "2026-03-16 00:50:23.503",
+  "updatedAt": "2026-05-19 00:00:00.000"
+}

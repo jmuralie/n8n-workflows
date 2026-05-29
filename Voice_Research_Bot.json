@@ -1,0 +1,159 @@
+{
+  "id": "voice-research-bot-v1",
+  "name": "Voice Research Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "vr01-tele-0000-0000-000000000001",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400],
+      "webhookId": "vb51f3b-aa7e-4f4f-c93g-d0ff146ec3be",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Voice Research Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handles both voice messages and text messages.\n// For voice: downloads OGG from Telegram, transcribes via OpenAI Whisper.\n// For text: passes through directly.\nconst msg = $input.first().json;\nconst message = msg.message || {};\nconst chatId = String(message.chat?.id || '');\nconst text = (message.text || '').trim();\nconst voice = message.voice || message.audio || null;\n\nif (!chatId) return [];\nif (text.startsWith('/')) return [];\n\nconst BOT_TOKEN = 'YOUR_BOT_TOKEN';\nconst OPENAI_KEY = 'YOUR_OPENAI_KEY';\n\nlet query = '';\n\nif (voice) {\n  // Step 1: Resolve file_id to a downloadable path\n  const fileInfo = await this.helpers.httpRequest({\n    method: 'GET',\n    url: `https://api.telegram.org/bot${BOT_TOKEN}/getFile`,\n    qs: { file_id: voice.file_id },\n    timeout: 10000\n  });\n  const filePath = fileInfo.result?.file_path;\n  if (!filePath) throw new Error('Could not resolve voice file path from Telegram');\n\n  // Step 2: Download the OGG audio binary\n  const audioData = await this.helpers.httpRequest({\n    method: 'GET',\n    url: `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`,\n    encoding: null,\n    timeout: 30000\n  });\n  const audioBuffer = Buffer.isBuffer(audioData) ? audioData : Buffer.from(audioData);\n\n  // Step 3: Transcribe with OpenAI Whisper\n  const transcription = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.openai.com/v1/audio/transcriptions',\n    headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },\n    formData: {\n      file: {\n        value: audioBuffer,\n        options: { filename: 'voice.ogg', contentType: 'audio/ogg; codecs=opus' }\n      },\n      model: 'whisper-1'\n    },\n    timeout: 60000\n  });\n  query = transcription.text || '';\n} else if (text) {\n  query = text;\n} else {\n  return [];\n}\n\nquery = query.trim();\nif (!query) return [];\n\nreturn [{ json: { query, chatId } }];"
+      },
+      "id": "vr02-getq-0000-0000-000000000002",
+      "name": "Get Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detects whether the user wants a quick summary (normal) or full-page deep dive.\n// Trigger words: 'go deeper', 'deeper:', 'elaborate', 'more detail', 'in depth', 'explain more'\nconst { query, chatId } = $input.first().json;\nconst q = (query || '').trim();\n\nif (!q) return [];\n\nconst deepRegex = /^(go\\s+)?deeper[:\\s]|^elaborate[:\\s]|^more\\s+detail[:\\s]|^in\\s+depth[:\\s]|^explain\\s+more[:\\s]/i;\nlet mode = 'normal';\nlet cleanQuery = q;\n\nif (deepRegex.test(q)) {\n  mode = 'deep';\n  cleanQuery = q\n    .replace(/^(go\\s+)?deeper[:\\s]*/i, '')\n    .replace(/^elaborate[:\\s]*/i, '')\n    .replace(/^more\\s+detail[:\\s]*/i, '')\n    .replace(/^in\\s+depth[:\\s]*/i, '')\n    .replace(/^explain\\s+more[:\\s]*/i, '')\n    .trim();\n}\n\nif (!cleanQuery) return [];\nreturn [{ json: { query: cleanQuery, chatId, mode } }];"
+      },
+      "id": "vr03-mode-0000-0000-000000000003",
+      "name": "Parse & Detect Mode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sends a typing indicator then hits SerpAPI Google Search.\n// Returns up to 10 organic results (title, url, snippet).\nconst { query, chatId, mode } = $input.first().json;\nconst SERPAPI_KEY = 'YOUR_SERPAPI_KEY';\nconst BOT_TOKEN = 'YOUR_BOT_TOKEN';\n\n// Let the user know the bot is working\nawait this.helpers.httpRequest({\n  method: 'POST',\n  url: `https://api.telegram.org/bot${BOT_TOKEN}/sendChatAction`,\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ chat_id: chatId, action: 'typing' }),\n  timeout: 5000\n}).catch(() => {});\n\nconst res = await this.helpers.httpRequest({\n  method: 'GET',\n  url: 'https://serpapi.com/search.json',\n  qs: {\n    engine: 'google',\n    q: query,\n    num: 10,\n    api_key: SERPAPI_KEY\n  },\n  timeout: 15000\n});\n\nconst results = (res.organic_results || []).slice(0, 10).map(r => ({\n  title: r.title || '',\n  url: r.link || '',\n  snippet: r.snippet || ''\n}));\n\nif (results.length === 0) {\n  await this.helpers.httpRequest({\n    method: 'POST',\n    url: `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({\n      chat_id: chatId,\n      text: 'No search results found. Please try rephrasing your query.'\n    }),\n    timeout: 10000\n  });\n  return [];\n}\n\nreturn [{ json: { query, chatId, mode, results } }];"
+      },
+      "id": "vr04-srch-0000-0000-000000000004",
+      "name": "Google Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "deep-mode-check",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "deep",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "vr05-ifdp-0000-0000-000000000005",
+      "name": "Is Deep?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deep mode: scrapes full text from the top 3 result pages via Jina AI Reader.\n// Jina AI (r.jina.ai) converts any URL to clean markdown — no API key needed.\nconst { query, chatId, results } = $input.first().json;\nconst topUrls = results.slice(0, 3).map(r => r.url);\nconst texts = [];\n\nfor (const url of topUrls) {\n  try {\n    const pageText = await this.helpers.httpRequest({\n      method: 'GET',\n      url: 'https://r.jina.ai/' + url,\n      headers: {\n        'Accept': 'text/plain',\n        'X-Return-Format': 'text'\n      },\n      encoding: 'utf8',\n      timeout: 20000\n    });\n    const text = typeof pageText === 'string' ? pageText : String(pageText);\n    texts.push(text.slice(0, 3000));\n  } catch(e) {\n    texts.push('[Could not scrape: ' + url + ' — ' + e.message + ']');\n  }\n}\n\nconst content = topUrls.map((url, i) =>\n  '=== Source ' + (i + 1) + ': ' + url + ' ===\\n' + texts[i]\n).join('\\n\\n---\\n\\n');\n\nreturn [{ json: { query, chatId, mode: 'deep', content, urls: topUrls } }];"
+      },
+      "id": "vr06-deep-0000-0000-000000000006",
+      "name": "Deep Scrape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normal mode: formats the top 10 search snippets into a numbered list for Claude.\nconst { query, chatId, results } = $input.first().json;\n\nconst content = results.map((r, i) =>\n  (i + 1) + '. ' + r.title + '\\n   ' + r.snippet + '\\n   ' + r.url\n).join('\\n\\n');\n\nreturn [{ json: {\n  query,\n  chatId,\n  mode: 'normal',\n  content,\n  urls: results.slice(0, 3).map(r => r.url)\n}}];"
+      },
+      "id": "vr07-snip-0000-0000-000000000007",
+      "name": "Format Snippets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 540]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "vr08-merg-0000-0000-000000000008",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1680, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sends content to Claude, then sends the reply back to Telegram.\n// Normal mode: 3-5 bullet point summary.\n// Deep mode: detailed structured answer from full page content.\nconst { query, chatId, mode, content, urls } = $input.first().json;\nconst ANTHROPIC_KEY = 'YOUR_ANTHROPIC_KEY';\nconst BOT_TOKEN = 'YOUR_BOT_TOKEN';\n\nconst isDeep = mode === 'deep';\n\nconst systemPrompt = isDeep\n  ? 'You are a thorough research assistant. The user requested an in-depth answer. Analyze the full page content provided and write a detailed, well-structured response with clear sections. Use Telegram HTML formatting only: <b>bold</b> for section headers, <a href=\\'URL\\'>Title</a> for source links. Be comprehensive and cite your sources.'\n  : 'You are a concise research assistant. Summarize the search results in 3-5 bullet points. Start each bullet with \\u2022 and a <b>bold key point</b> followed by a brief explanation (1-2 sentences). End with a Sources section listing up to 3 links formatted as <a href=\\'URL\\'>Site Name</a>. Use Telegram HTML only.';\n\nconst userPrompt = 'Research question: ' + query + '\\n\\n'\n  + (isDeep ? 'Full page content from top results' : 'Search result snippets')\n  + ':\\n\\n' + content;\n\nlet replyText = '';\ntry {\n  const res = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.anthropic.com/v1/messages',\n    headers: {\n      'x-api-key': ANTHROPIC_KEY,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json'\n    },\n    body: JSON.stringify({\n      model: 'claude-sonnet-4-6',\n      max_tokens: isDeep ? 2048 : 1024,\n      system: systemPrompt,\n      messages: [{ role: 'user', content: userPrompt }]\n    }),\n    timeout: 45000\n  });\n  replyText = res.content?.[0]?.text || 'No response generated.';\n} catch(e) {\n  replyText = '<b>Error generating response:</b> ' + e.message;\n}\n\nawait this.helpers.httpRequest({\n  method: 'POST',\n  url: `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    chat_id: chatId,\n    text: replyText,\n    parse_mode: 'HTML',\n    disable_web_page_preview: true\n  }),\n  timeout: 15000\n});\n\nreturn [{ json: { status: 'done', query, mode, chatId } }];"
+      },
+      "id": "vr09-clde-0000-0000-000000000009",
+      "name": "Claude + Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 400]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Get Query", "type": "main", "index": 0 }]]
+    },
+    "Get Query": {
+      "main": [[{ "node": "Parse & Detect Mode", "type": "main", "index": 0 }]]
+    },
+    "Parse & Detect Mode": {
+      "main": [[{ "node": "Google Search", "type": "main", "index": 0 }]]
+    },
+    "Google Search": {
+      "main": [[{ "node": "Is Deep?", "type": "main", "index": 0 }]]
+    },
+    "Is Deep?": {
+      "main": [
+        [{ "node": "Deep Scrape", "type": "main", "index": 0 }],
+        [{ "node": "Format Snippets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Deep Scrape": {
+      "main": [[{ "node": "Merge", "type": "main", "index": 0 }]]
+    },
+    "Format Snippets": {
+      "main": [[{ "node": "Merge", "type": "main", "index": 1 }]]
+    },
+    "Merge": {
+      "main": [[{ "node": "Claude + Reply", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "createdAt": "2026-05-27T00:00:00.000Z",
+  "updatedAt": "2026-05-27T00:00:00.000Z"
+}

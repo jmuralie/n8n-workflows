@@ -1,0 +1,439 @@
+{
+  "id": "ukoB8yuE4Y5QS7VJ",
+  "name": "Slack to asana task",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-to-asana",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "df68e220-5f90-41c2-a556-7647ad2838e6",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2352,
+        528
+      ],
+      "webhookId": "slack-to-asana"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Receive payload from the Python Slack listener\n// Expected: { channel, channel_name, user, ts, messages }\nconst body = $input.first().json.body || $input.first().json;\n\nconst channel      = body.channel      || 'unknown';\nconst channelName  = body.channel_name || body.channel || 'unknown';\nconst user         = body.user         || 'unknown';\nconst ts           = body.ts           || '';\nconst messages     = body.messages     || '';\n\nif (!messages.trim()) {\n  throw new Error('Empty message received \u2014 skipping');\n}\n\n// Your Asana project map (OUHSC workspace)\nconst projects = [\n  { gid: '98748256368492',   name: 'Stimulant' },\n  { gid: '110638020429313', name: 'Shared Resource mgt' },\n  { gid: '184322431079847', name: 'Core' },\n  { gid: '184322431079852', name: 'Writing projects' },\n  { gid: '189808437708257', name: 'Personal' },\n  { gid: '1199886722958318', name: 'Business' },\n  { gid: '1201518051754740', name: 'Organize' }\n];\n\nconst systemPrompt = `You are an expert task extractor. You read Slack messages and extract actionable work items as Asana tasks.\n\nWorkspace: OUHSC (GID: 98680584656706)\nAuto-assign each task to the most appropriate project. Available projects:\n${projects.map(p => `  - \"${p.name}\" (GID: ${p.gid})`).join('\\n')}\n\nRules:\n1. Extract ONLY concrete, actionable tasks \u2014 ignore chit-chat, questions, and vague statements\n2. If a task is complex or multi-step, add 2-5 subtasks\n3. Task names must start with a verb (Fix, Update, Write, Create, Migrate, etc.)\n4. If the message contains no actionable tasks, return an empty tasks array\n5. Respond ONLY with valid JSON \u2014 no markdown, no explanation, no code fences\n\nJSON format:\n{\n  \"tasks\": [\n    {\n      \"name\": \"Verb-first task name\",\n      \"notes\": \"1-2 sentences of context\",\n      \"project_gid\": \"GID string\",\n      \"project_name\": \"Project display name\",\n      \"subtasks\": [ { \"name\": \"Subtask name\" } ]\n    }\n  ],\n  \"summary\": \"One sentence summary or 'No actionable tasks found'\"\n}`;\n\nconst userPrompt = `Slack channel: #${channelName}\\nUser: ${user}\\n\\nMessage:\\n${messages}`;\n\nreturn [{\n  json: {\n    channel,\n    channelName,\n    user,\n    ts,\n    messages,\n    systemPrompt,\n    userPrompt\n  }\n}];"
+      },
+      "id": "8e9afd9f-4bd0-4775-849c-21c9b54fb76d",
+      "name": "Prepare Claude Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2128,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-api-key",
+              "value": "YOUR_ANTHROPIC_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "=json",
+        "specifyBody": "json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 1024,\n  \"system\": \"={{ $json.systemPrompt }}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"={{ $json.userPrompt }}\"\n    }\n  ]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "e097a1f6-1b9d-4a71-bd36-7e12cf03e1ca",
+      "name": "Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1904,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claudeResponse = $input.first().json;\nconst promptData = $('Prepare Claude Prompt').first().json;\n\nconst textBlock = claudeResponse.content?.find(b => b.type === 'text');\nif (!textBlock) {\n  throw new Error('No text in Claude response: ' + JSON.stringify(claudeResponse).substring(0, 200));\n}\n\nlet raw = textBlock.text.replace(/```json|```/g, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch(e) {\n  const m = raw.match(/\\{[\\s\\S]*\\}/);\n  if (m) {\n    try { parsed = JSON.parse(m[0]); }\n    catch(e2) { throw new Error('Unparseable Claude JSON: ' + raw.substring(0, 200)); }\n  } else {\n    throw new Error('No JSON in Claude response: ' + raw.substring(0, 200));\n  }\n}\n\nconst tasks = parsed.tasks || [];\nconst summary = parsed.summary || `Found ${tasks.length} task(s)`;\n\nif (tasks.length === 0) {\n  return [{ json: { hasNoTasks: true, summary, channel: promptData.channel, channelName: promptData.channelName, ts: promptData.ts } }];\n}\n\nreturn tasks.map((task, i) => ({\n  json: {\n    taskIndex: i,\n    totalTasks: tasks.length,\n    summary,\n    name: task.name,\n    notes: task.notes || '',\n    project_gid: task.project_gid,\n    project_name: task.project_name || 'Asana',\n    subtasks: task.subtasks || [],\n    hasSubtasks: (task.subtasks || []).length > 0,\n    channel: promptData.channel,\n    channelName: promptData.channelName,\n    ts: promptData.ts\n  }\n}));"
+      },
+      "id": "27efb771-abf3-4062-b7a6-d51cefb7329d",
+      "name": "Parse Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1696,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "no-tasks",
+              "leftValue": "={{ $json.hasNoTasks }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "765ddca6-c27e-462c-bc3b-fcbc7ee828ff",
+      "name": "Has Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No actionable tasks \u2014 log and stop quietly\nconsole.log('No tasks found:', $input.first().json.summary);\nreturn [];"
+      },
+      "id": "2f99e452-3585-4029-a686-847645613732",
+      "name": "Skip (No Tasks)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "workspace": "98680584656706",
+        "name": "={{ $json.name }}",
+        "otherProperties": {}
+      },
+      "id": "5c551201-cd16-49a5-916f-44c89fa92ced",
+      "name": "Create Asana Task",
+      "type": "n8n-nodes-base.asana",
+      "typeVersion": 1,
+      "position": [
+        -1248,
+        672
+      ],
+      "credentials": {
+        "asanaApi": {
+          "id": "rtTRlzARCcCPcLjE",
+          "name": "home-n8n bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const created = $input.first().json;\nconst allParsed = $('Parse Claude Response').all();\n\nconst taskName = created.name || created.data?.name;\nconst taskGid  = created.gid  || created.data?.gid;\n\nconst matched = allParsed.find(i => i.json.name === taskName);\nconst subtasks    = matched?.json?.subtasks    || [];\nconst channelName = matched?.json?.channelName || '';\nconst ts          = matched?.json?.ts          || '';\nconst channel     = matched?.json?.channel     || '';\n\nreturn [{\n  json: { taskGid, taskName, subtasks, hasSubtasks: subtasks.length > 0, channelName, channel, ts }\n}];"
+      },
+      "id": "50d9254f-fec8-4f0e-bfcc-cad37ab605c8",
+      "name": "Attach Subtask Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-subs",
+              "leftValue": "={{ $json.hasSubtasks }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b812f4ab-cd31-46ca-ac87-9949860a94a7",
+      "name": "Has Subtasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { taskGid, taskName, subtasks, channelName, channel, ts } = $input.first().json;\nreturn subtasks.map((s, i) => ({\n  json: { parentTaskGid: taskGid, parentTaskName: taskName, subtaskName: s.name, subtaskIndex: i, channelName, channel, ts }\n}));"
+      },
+      "id": "a4ffd33e-ed2f-41bc-8506-01065ad3f679",
+      "name": "Expand Subtasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -592,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "workspace": {
+          "__rl": true,
+          "value": "98680584656706",
+          "mode": "id"
+        },
+        "name": "={{ $json.subtaskName }}",
+        "otherProperties": {}
+      },
+      "id": "9be0bbea-4092-4f88-a2d2-e3c65882788e",
+      "name": "Create Subtask",
+      "type": "n8n-nodes-base.asana",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        576
+      ],
+      "credentials": {
+        "asanaApi": {
+          "id": "rtTRlzARCcCPcLjE",
+          "name": "home-n8n bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst names = items.map(i => i.json.name || i.json.subtaskName || 'Task').filter(Boolean);\nreturn [{ json: { success: true, tasks_created: items.length, task_names: names } }];"
+      },
+      "id": "11e645dd-0ec5-4d06-88d2-50d461bcff3c",
+      "name": "Collect Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer YOUR_SLACK_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"={{ $('Prepare Claude Prompt').first().json.channel }}\",\n  \"thread_ts\": \"={{ $('Prepare Claude Prompt').first().json.ts }}\",\n  \"text\": \"={{ '\u2705 Created ' + $json.tasks_created + ' Asana task(s):\\\\n' + $json.task_names.map((n,i) => (i+1) + '. ' + n).join('\\\\n') }}\"\n}",
+        "options": {}
+      },
+      "id": "e2023b77-06a2-474e-8177-72c8abfce54b",
+      "name": "Reply in Slack Thread",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        672
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WcGUqDQrgbYoznCy",
+          "name": "Claude api key"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Claude Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Claude Prompt": {
+      "main": [
+        [
+          {
+            "node": "Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API": {
+      "main": [
+        [
+          {
+            "node": "Parse Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Claude Response": {
+      "main": [
+        [
+          {
+            "node": "Has Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Tasks?": {
+      "main": [
+        [
+          {
+            "node": "Skip (No Tasks)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Asana Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Asana Task": {
+      "main": [
+        [
+          {
+            "node": "Attach Subtask Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Subtask Data": {
+      "main": [
+        [
+          {
+            "node": "Has Subtasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Subtasks?": {
+      "main": [
+        [
+          {
+            "node": "Expand Subtasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Collect Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand Subtasks": {
+      "main": [
+        [
+          {
+            "node": "Create Subtask",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Subtask": {
+      "main": [
+        [
+          {
+            "node": "Collect Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Results": {
+      "main": [
+        [
+          {
+            "node": "Reply in Slack Thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "active": true,
+  "createdAt": "2026-03-04 04:17:50.948",
+  "updatedAt": "2026-03-26 05:16:44.708"
+}

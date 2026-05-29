@@ -1,0 +1,133 @@
+{
+  "id": "research-assistant-v1",
+  "name": "Research Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400],
+      "webhookId": "ad442e2a-ff6d-4e6e-b82f-c9ee035db2ad",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_TELEGRAM_CRED_ID",
+          "name": "Research Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $input.first().json;\nconst text = (msg.message?.text || '').trim();\nconst chatId = String(msg.message?.chat?.id || '');\n\nlet route = 'general';\nlet topic = text;\n\nif (/^india\\s*:/i.test(text)) {\n  route = 'india';\n  topic = text.replace(/^india\\s*:\\s*/i, '').trim();\n}\n\n// Stop silently if topic is empty (e.g. bot commands, empty messages)\nif (!topic || topic.startsWith('/')) return [];\n\nreturn [{ json: { route, topic, chatId } }];"
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "route-india-check",
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "india",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Route",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { topic, chatId } = $input.first().json;\nconst SERPAPI_KEY = 'YOUR_SERPAPI_KEY';\nconst BRAVE_KEY = 'YOUR_BRAVE_KEY';\nconst results = [];\n\n// SerpAPI — Google web search\ntry {\n  const res = await this.helpers.httpRequest({\n    method: 'GET',\n    url: 'https://serpapi.com/search.json',\n    qs: { engine: 'google', q: topic, num: 10, api_key: SERPAPI_KEY },\n    timeout: 15000\n  });\n  for (const r of (res.organic_results || []).slice(0, 5)) {\n    results.push({ title: r.title || '', url: r.link || '', snippet: r.snippet || '', source: 'Google' });\n  }\n} catch(e) {}\n\n// Brave Search\ntry {\n  const res = await this.helpers.httpRequest({\n    method: 'GET',\n    url: 'https://api.search.brave.com/res/v1/web/search',\n    headers: { 'X-Subscription-Token': BRAVE_KEY, 'Accept': 'application/json' },\n    qs: { q: topic, count: 10 },\n    timeout: 15000\n  });\n  for (const r of (res.web?.results || []).slice(0, 5)) {\n    results.push({ title: r.title || '', url: r.url || '', snippet: r.description || '', source: 'Brave' });\n  }\n} catch(e) {}\n\nreturn [{ json: { topic, results, chatId, route: 'general' } }];"
+      },
+      "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+      "name": "General Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { topic, chatId } = $input.first().json;\nconst SERPAPI_KEY = 'YOUR_SERPAPI_KEY';\nconst NEWSDATA_KEY = 'YOUR_NEWSDATA_KEY';\nconst results = [];\n\n// SerpAPI — Google News India\ntry {\n  const res = await this.helpers.httpRequest({\n    method: 'GET',\n    url: 'https://serpapi.com/search.json',\n    qs: { engine: 'google_news', q: topic, gl: 'in', hl: 'en', api_key: SERPAPI_KEY },\n    timeout: 15000\n  });\n  for (const r of (res.news_results || []).slice(0, 5)) {\n    results.push({ title: r.title || '', url: r.link || '', snippet: r.snippet || '', source: r.source?.name || 'Google News' });\n  }\n} catch(e) {}\n\n// NewsData.io — India (country=in)\ntry {\n  const res = await this.helpers.httpRequest({\n    method: 'GET',\n    url: 'https://newsdata.io/api/1/news',\n    qs: { country: 'in', language: 'en', q: topic, apikey: NEWSDATA_KEY },\n    timeout: 15000\n  });\n  for (const a of (res.results || []).slice(0, 5)) {\n    results.push({ title: a.title || '', url: a.link || '', snippet: a.description || '', source: a.source_id || 'NewsData' });\n  }\n} catch(e) {}\n\nreturn [{ json: { topic, results, chatId, route: 'india' } }];"
+      },
+      "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "name": "India News Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 540]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { topic, results, chatId, route } = $input.first().json;\nconst ANTHROPIC_KEY = 'YOUR_ANTHROPIC_KEY';\nconst BOT_TOKEN = 'YOUR_BOT_TOKEN';\n\nconst lines = results.map((r, i) =>\n  (i + 1) + '. ' + r.title +\n  '\\n   Source: ' + r.source +\n  '\\n   ' + r.snippet +\n  '\\n   URL: ' + r.url\n);\nconst context = results.length > 0 ? lines.join('\\n\\n') : 'No results found.';\n\nconst routeLabel = route === 'india' ? 'India news' : 'web research';\nconst prompt =\n  'You are a research assistant. Summarize the following ' + routeLabel + ' search results for the topic: ' + topic +\n  '\\n\\nWrite 3-5 concise bullet points covering the most important findings. Format your response using Telegram HTML: use <b>text</b> for bold headings and hyperlinks for sources. End with a Sources section listing up to 3 links.' +\n  '\\n\\nSearch Results:\\n' + context;\n\nlet replyText = '';\ntry {\n  const res = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.anthropic.com/v1/messages',\n    headers: {\n      'x-api-key': ANTHROPIC_KEY,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json'\n    },\n    body: JSON.stringify({\n      model: 'claude-sonnet-4-6',\n      max_tokens: 1024,\n      messages: [{ role: 'user', content: prompt }]\n    }),\n    timeout: 30000\n  });\n  replyText = res.content?.[0]?.text || 'No summary generated.';\n} catch(e) {\n  replyText = 'Error generating summary: ' + e.message;\n}\n\nawait this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    chat_id: chatId,\n    text: replyText,\n    parse_mode: 'HTML',\n    disable_web_page_preview: true\n  }),\n  timeout: 15000\n});\n\nreturn [{ json: { status: 'done', topic, route, resultsCount: results.length } }];"
+      },
+      "id": "a7b8c9d0-e1f2-3456-abcd-567890123456",
+      "name": "Claude + Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 400]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Parse Input", "type": "main", "index": 0 }]]
+    },
+    "Parse Input": {
+      "main": [[{ "node": "Route", "type": "main", "index": 0 }]]
+    },
+    "Route": {
+      "main": [
+        [{ "node": "India News Search", "type": "main", "index": 0 }],
+        [{ "node": "General Search", "type": "main", "index": 0 }]
+      ]
+    },
+    "India News Search": {
+      "main": [[{ "node": "Merge", "type": "main", "index": 0 }]]
+    },
+    "General Search": {
+      "main": [[{ "node": "Merge", "type": "main", "index": 1 }]]
+    },
+    "Merge": {
+      "main": [[{ "node": "Claude + Reply", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "createdAt": "2026-05-16T00:00:00.000Z",
+  "updatedAt": "2026-05-16T00:00:00.000Z"
+}

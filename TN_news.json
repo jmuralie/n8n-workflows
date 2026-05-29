@@ -1,0 +1,75 @@
+{
+  "id": "ZmwpVzKPx9gvhUj0",
+  "name": "TN news",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "30 2 * * *" },
+            { "field": "cronExpression", "expression": "30 13 * * *" }
+          ]
+        }
+      },
+      "id": "07e0f355-605d-439f-9d9b-d9032778e4eb",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [3216, 656]
+    },
+    {
+      "parameters": {
+        "jsCode": "const feeds = [\n  { name: 'The Hindu TN', url: 'https://www.thehindu.com/news/national/tamil-nadu/feeder/default.rss' },\n  { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms' },\n  { name: 'New Indian Express TN', url: 'https://www.newindianexpress.com/states/tamil-nadu/rssfeed/' },\n  { name: 'Dinamalar', url: 'https://www.dinamalar.com/rss/news.xml' },\n  { name: 'Dinakaran', url: 'https://www.dinakaran.com/rss/news.xml' }\n];\n\nfunction clean(s) {\n  return s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&#039;/g, \"'\").replace(/\\s+/g, ' ').trim();\n}\n\nfunction extractArticles(xml, source, limit) {\n  const articles = [];\n  const itemRe = /<item>([\\s\\S]*?)<\\/item>/gi;\n  let m;\n  while ((m = itemRe.exec(xml)) !== null && articles.length < limit) {\n    const block = m[1];\n    const titleM = block.match(/<title[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/title>/i);\n    const title = titleM ? clean(titleM[1]) : '';\n    if (title.length <= 20) continue;\n    let link = '';\n    const linkM = block.match(/<link[^>]*>\\s*(https?:\\/\\/[^\\s<]+)/i);\n    if (linkM) link = linkM[1].trim();\n    let imageUrl = '';\n    const t1 = block.match(/<media:thumbnail[^>]+url=\"([^\"]+)\"/i);\n    const t2 = block.match(/<media:content[^>]+url=\"([^\"]+\\.(?:jpg|jpeg|png|webp)[^\"]*)\"/i);\n    const t3 = block.match(/<enclosure[^>]+url=\"([^\"]+\\.(?:jpg|jpeg|png|webp))\"/i);\n    if (t1) imageUrl = t1[1];\n    else if (t2) imageUrl = t2[1];\n    else if (t3) imageUrl = t3[1];\n    if (!imageUrl) {\n      const descM = block.match(/<description[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/description>/i);\n      if (descM) {\n        const imgM = descM[1].match(/<img[^>]+src=\"([^\"]+\\.(?:jpg|jpeg|png|webp)[^\"]*)\"/i);\n        if (imgM) imageUrl = imgM[1];\n      }\n    }\n    articles.push({ title, link, imageUrl, source });\n  }\n  return articles;\n}\n\nlet allArticles = [];\n\nfor (const feed of feeds) {\n  try {\n    const res = await this.helpers.httpRequest({\n      method: 'GET',\n      url: feed.url,\n      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; n8n-bot/1.0)', 'Accept': 'application/rss+xml, application/xml, text/xml, */*' },\n      returnFullResponse: false,\n      timeout: 15000\n    });\n    const xml = typeof res === 'string' ? res : JSON.stringify(res);\n    allArticles = allArticles.concat(extractArticles(xml, feed.name, 5));\n  } catch (err) { /* skip unavailable feed */ }\n}\n\nreturn [{ json: { articles: allArticles } }];"
+      },
+      "id": "244911ef-b3cd-4a37-bc30-3249a2b06444",
+      "name": "Fetch All RSS Feeds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3456, 656]
+    },
+    {
+      "parameters": {
+        "jsCode": "const articles = $input.first().json.articles || [];\nconst top10 = articles.slice(0, 10);\nreturn [{ json: { articlesWithImages: top10 } }];"
+      },
+      "id": "9490b086-136e-47a5-9f52-cf6cc7cd4dcb",
+      "name": "Filter Top 10",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3728, 656]
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = 'YOUR_BOT_TOKEN';\n\nconst chatId = '8113726432';\nconst articles = $('Filter Top 10').first().json.articlesWithImages || [];\n\nfunction escHtml(s) {\n  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\n\nconst now = new Date();\nconst session = now.getUTCHours() < 14 ? '\ud83c\udf05 Morning' : '\ud83c\udf06 Evening';\nconst dateStr = now.toLocaleDateString('en-IN', {\n  timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'\n});\nconst header = '\ud83d\udcf0 <b>TN News \u2014 ' + session + '</b>\\n' + dateStr;\n\nif (articles.length === 0) {\n  await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.telegram.org/bot' + token + '/sendMessage',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ chat_id: chatId, text: header + '\\n\\n\u26a0\ufe0f No articles with images found.', parse_mode: 'HTML' }),\n    timeout: 15000\n  });\n  return [{ json: { status: 'no articles' } }];\n}\n\n// 1. Send text digest with all headlines and links\nconst lines = [header, ''];\narticles.forEach((a, i) => {\n  const t = escHtml(a.title);\n  lines.push((i + 1) + '. ' + (a.link ? '<a href=\"' + a.link + '\">' + t + '</a>' : t) + '\\n   \ud83d\udcf0 <i>' + escHtml(a.source) + '</i>');\n});\nawait this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.telegram.org/bot' + token + '/sendMessage',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ chat_id: chatId, text: lines.join('\\n'), parse_mode: 'HTML', disable_web_page_preview: true }),\n  timeout: 15000\n});\n\nreturn [{ json: { status: 'done', count: articles.length } }];"
+      },
+      "id": "f4b2d8e1-6c3a-4e7b-b9d5-2f8a0c4e6b1d",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3984, 656]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Fetch All RSS Feeds", "type": "main", "index": 0 }]]
+    },
+    "Fetch All RSS Feeds": {
+      "main": [[{ "node": "Filter Top 10", "type": "main", "index": 0 }]]
+    },
+    "Filter Top 10": {
+      "main": [[{ "node": "Send to Telegram", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "active": true,
+  "createdAt": "2026-03-16 02:06:14.583",
+  "updatedAt": "2026-05-15 00:00:00.000"
+}
