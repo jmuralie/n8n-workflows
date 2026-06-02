@@ -1,0 +1,177 @@
+{
+  "id": "visa-slot-monitor-v2",
+  "name": "Visa Slot Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "visa-slot-alert",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "vsm01-wbhk-0000-0000-000000000001",
+      "name": "Receive Alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "visa-slot-alert"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read rolling context from workflow static data and prepare Claude payload.\nconst staticData = $getWorkflowStaticData('global');\nconst messageHistory = staticData.messageHistory || [];\n\nconst raw = $input.first().json;\nconst data = raw.body || raw;\nconst group      = data.group      || 'Unknown Group';\nconst message    = data.message    || '';\nconst timestamp  = data.timestamp  || new Date().toISOString();\nconst message_id = data.message_id || null;\nconst chat_id    = data.chat_id    || null;\n\n// Build context block from last 6 stored messages\nconst recent = messageHistory.slice(-6);\nconst ctxLines = recent.map(function(h) { return '[' + h.group + '] ' + h.message; });\nconst contextBlock = recent.length > 0\n  ? 'RECENT MESSAGES (background context only):\\n' + ctxLines.join('\\n') + '\\n\\n'\n  : '';\n\nconst systemPrompt = [\n  'You are a relevance filter for a US B2 visa appointment slot monitoring system watching Telegram groups in India.',\n  '',\n  'Decide if the LATEST MESSAGE is relevant to B2 visa appointment SLOT AVAILABILITY — meaning slots exist, just opened, or became available at a US consulate.',\n  '',\n  'FORWARD (relevant=true) when the message:',\n  '- Reports that appointment slots are open or have just opened',\n  '- Someone found or successfully booked an available slot',\n  '- Mentions available dates at specific consulates (Chennai, Mumbai, Hyderabad, Delhi, Kolkata, Bangalore)',\n  '- Reports cancellations that freed up slots',\n  '- Describes a tool or script that detected open slots',\n  '',\n  'FILTER (relevant=false) only when the message is clearly:',\n  '- A general visa application or document requirements question',\n  '- A visa interview result or experience (approved/denied/attended)',\n  '- Off-topic conversation, greetings, jokes, or spam',\n  '- Admin notices or bot messages unrelated to slot availability',\n  '',\n  'CRITICAL RULE: When uncertain, ALWAYS forward (relevant=true). Missing a real slot alert is far worse than a false positive.',\n  '',\n  'Reply with ONLY a single line of valid JSON, e.g.: {\"relevant\": true, \"reason\": \"brief reason\"}'\n].join('\\n');\n\nconst userContent = contextBlock + 'LATEST MESSAGE TO CLASSIFY:\\n[' + group + ']: ' + message;\n\n// Save to history now (before the API call)\nmessageHistory.push({ group: group, message: message, timestamp: timestamp });\nstaticData.messageHistory = messageHistory.slice(-10);\n\nreturn [{ json: { group: group, message: message, timestamp: timestamp, message_id: message_id, chat_id: chat_id, systemPrompt: systemPrompt, userContent: userContent } }];"
+      },
+      "id": "vsm02-ctx-0000-0000-000000000002",
+      "name": "Load Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({model: 'claude-sonnet-4-6', max_tokens: 120, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userContent}]}) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "vsm03-http-0000-0000-000000000003",
+      "name": "Call Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-api-sra-001",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull original message fields from Load Context node\nconst prev = $('Load Context').first().json;\nconst group      = prev.group;\nconst message    = prev.message;\nconst timestamp  = prev.timestamp;\nconst message_id = prev.message_id;\nconst chat_id    = prev.chat_id;\n\n// Parse Claude's JSON decision from the HTTP response\nlet relevant = true;\nlet reason   = 'parse error, defaulting to forward';\n\ntry {\n  const resp = $input.first().json;\n  if (resp && resp.content && resp.content[0] && resp.content[0].text) {\n    const text  = resp.content[0].text.trim();\n    const start = text.indexOf('{');\n    const end   = text.lastIndexOf('}');\n    if (start !== -1 && end !== -1) {\n      const parsed = JSON.parse(text.slice(start, end + 1));\n      relevant = parsed.relevant !== false; // default true unless explicitly false\n      reason   = parsed.reason || '';\n    }\n  }\n} catch (err) {\n  reason = 'parse error: ' + err.message;\n}\n\nconsole.log('[' + (relevant ? 'FORWARD' : 'FILTER') + '] ' + reason + ' | ' + (message || '').slice(0, 80));\n\nreturn [{ json: { group: group, message: message, timestamp: timestamp, message_id: message_id, chat_id: chat_id, relevant: relevant, reason: reason } }];"
+      },
+      "id": "vsm04-parse-0000-000000000004",
+      "name": "Parse Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "vsm-cond-relevant-001",
+              "leftValue": "={{ $json.relevant }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "vsm05-ifnd-0000-0000-000000000005",
+      "name": "Is Relevant?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst group     = data.group     || 'Unknown Group';\nconst message   = data.message   || '';\nconst timestamp = data.timestamp || new Date().toISOString();\nconst reason    = data.reason    || '';\n\nconst ts = new Date(timestamp).toLocaleString('en-US', {\n  timeZone: 'America/Chicago',\n  dateStyle: 'medium',\n  timeStyle: 'short'\n});\n\nconst preview = message.length > 500 ? message.slice(0, 500) + '\\u2026' : message;\n\nconst slackText = [\n  ':passport_control: *B2 Visa Slot Alert*',\n  '',\n  '*Group:* ' + group,\n  '*Time:*  ' + ts + ' CT',\n  '',\n  '*Message:*',\n  preview\n].join('\\n');\n\nreturn [{ json: { slackText: slackText, group: group, message: message, timestamp: timestamp, reason: reason } }];"
+      },
+      "id": "vsm06-fmt0-0000-0000-000000000006",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/YOUR_SLACK_WEBHOOK_URL",
+        "sendHeaders": false,
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.slackText }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "vsm07-slak-0000-0000-000000000007",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 200]
+    }
+  ],
+  "connections": {
+    "Receive Alert": {
+      "main": [
+        [{"node": "Load Context", "type": "main", "index": 0}]
+      ]
+    },
+    "Load Context": {
+      "main": [
+        [{"node": "Call Claude", "type": "main", "index": 0}]
+      ]
+    },
+    "Call Claude": {
+      "main": [
+        [{"node": "Parse Decision", "type": "main", "index": 0}]
+      ]
+    },
+    "Parse Decision": {
+      "main": [
+        [{"node": "Is Relevant?", "type": "main", "index": 0}]
+      ]
+    },
+    "Is Relevant?": {
+      "main": [
+        [{"node": "Format Message", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Format Message": {
+      "main": [
+        [{"node": "Send Slack Alert", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3"
+}
