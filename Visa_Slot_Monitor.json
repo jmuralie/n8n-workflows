@@ -44,7 +44,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({model: 'claude-sonnet-4-6', max_tokens: 120, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userContent}]}) }}",
+        "body": "={{ JSON.stringify({model: 'claude-haiku-4-5', max_tokens: 120, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userContent}]}) }}",
         "options": {
           "timeout": 30000
         }
