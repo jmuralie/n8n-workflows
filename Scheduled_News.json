@@ -1,0 +1,132 @@
+{
+  "id": "wGEX1SGa1n4zF9U0",
+  "name": "Scheduled news",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {"triggerAtHour": 7},
+            {"triggerAtHour": 19}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "id": "8f7715e0-160a-4b4d-ad05-d1242bc3d780",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "stocks OR earnings OR \"stock market\" OR acquisition OR merger OR inflation OR \"interest rate\""
+            },
+            {
+              "name": "from",
+              "value": "={{ $today.minus({ days:2 }).toFormat('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "language",
+              "value": "en"
+            },
+            {
+              "name": "sortBy",
+              "value": "publishedAt"
+            },
+            {
+              "name": "pageSize",
+              "value": "30"
+            },
+            {
+              "name": "apiKey",
+              "value": "YOUR_NEWSAPI_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [208, 0],
+      "id": "6e2378f2-a236-429c-9773-7028e6268ca6",
+      "name": "NewsAPI-News"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-haiku-4-5-20251001",
+          "mode": "list",
+          "cachedResultName": "claude-haiku-4-5-20251001"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a financial analyst monitoring market-moving news. From the articles provided, select the top 10 stories most likely to affect stock prices.\n\nFor each item provide one line in this format:\n[TICKER or SECTOR] — summary — 🟢 Bullish / 🔴 Bearish / 🟡 Mixed\n\nPrioritise:\n- Earnings reports, revenue surprises, guidance changes\n- M&A: acquisitions, mergers, spin-offs\n- Fed policy, interest rate decisions, inflation data\n- Regulatory actions or lawsuits affecting public companies\n- Major executive changes at large-cap companies\n- Sector-wide shocks (supply chain, commodities, energy)\n\nOutput: numbered list 1–10, one line each. No preamble, no closing remarks.\n\nArticles:\n{{ JSON.stringify($json.articles) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [416, 0],
+      "id": "a1847d21-d6ab-48cc-a100-aafd6fb803c7",
+      "name": "Message a model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-api-sra-001",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0B8VD2TC56",
+          "mode": "id"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [624, 0],
+      "id": "f9801cf1-587a-40a1-8444-eeb057150933",
+      "name": "Send a message",
+      "webhookId": "8637cc69-261b-4b63-8c1f-c1fb8b7e1c68",
+      "credentials": {
+        "slackApi": {
+          "id": "9OPOUgU5VFzgV0iP",
+          "name": "home-n8n bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{"node": "NewsAPI-News", "type": "main", "index": 0}]]
+    },
+    "NewsAPI-News": {
+      "main": [[{"node": "Message a model", "type": "main", "index": 0}]]
+    },
+    "Message a model": {
+      "main": [[{"node": "Send a message", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "active": true
+}
