@@ -24,28 +24,21 @@
     },
     {
       "parameters": {
-        "url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "method": "POST",
+        "url": "https://airquality.googleapis.com/v1/currentConditions:lookup",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
             {
-              "name": "latitude",
-              "value": "35.6528"
-            },
-            {
-              "name": "longitude",
-              "value": "-97.4781"
-            },
-            {
-              "name": "current",
-              "value": "us_aqi,pm10,pm2_5,ozone,dust,grass_pollen,ragweed_pollen,birch_pollen"
-            },
-            {
-              "name": "timezone",
-              "value": "America/Chicago"
+              "name": "key",
+              "value": "YOUR_GOOGLE_API_KEY"
             }
           ]
         },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "{\"location\":{\"latitude\":35.6528,\"longitude\":-97.4781},\"extraComputations\":[\"POLLUTANT_CONCENTRATION\",\"LOCAL_AQI\"],\"languageCode\":\"en\"}",
         "options": {}
       },
       "id": "03ac1d88-9777-4a5f-be88-e9681eed24e0",
@@ -59,7 +52,46 @@
     },
     {
       "parameters": {
-        "jsCode": "const aq = $('Fetch Air Quality').first().json;\nconst c = aq.current;\nconst chatId = '8113726432';\n\nconst aqiLabel = (v) => {\n  if (v <= 50)  return '\\uD83D\\uDFE2 Good';\n  if (v <= 100) return '\\uD83D\\uDFE1 Moderate';\n  if (v <= 150) return '\\uD83D\\uDFE0 Unhealthy for sensitive groups';\n  if (v <= 200) return '\\uD83D\\uDD34 Unhealthy';\n  if (v <= 300) return '\\uD83D\\uDFE3 Very Unhealthy';\n  return '\\u26AB Hazardous';\n};\n\nconst ozoneLabel = (v) => {\n  if (v < 60)  return '\\uD83D\\uDFE2 Low';\n  if (v < 100) return '\\uD83D\\uDFE1 Moderate';\n  if (v < 140) return '\\uD83D\\uDFE0 High';\n  return '\\uD83D\\uDD34 Very High';\n};\n\nconst dustLabel = (v) => {\n  if (v < 25)  return '\\uD83D\\uDFE2 Low';\n  if (v < 50)  return '\\uD83D\\uDFE1 Moderate';\n  if (v < 100) return '\\uD83D\\uDFE0 High';\n  return '\\uD83D\\uDD34 Very High';\n};\n\nconst pollenLabel = (v) => {\n  if (v === null || v === undefined) return '\\u26AA N/A';\n  if (v < 10)  return '\\uD83D\\uDFE2 Low (' + v + ')';\n  if (v < 50)  return '\\uD83D\\uDFE1 Moderate (' + v + ')';\n  if (v < 200) return '\\uD83D\\uDFE0 High (' + v + ')';\n  return '\\uD83D\\uDD34 Very High (' + v + ')';\n};\n\nconst today = new Date().toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'America/Chicago'\n});\n\nconst msg = `\\uD83C\\uDF24 <b>Air Quality Report \\u2014 ${today}</b>\n\n\\uD83C\\uDF0D <b>Overall AQI:</b> ${c.us_aqi} \\u2014 ${aqiLabel(c.us_aqi)}\n\\uD83C\\uDF2B <b>PM10:</b> ${c.pm10} \\u00B5g/m\\u00B3 \\u2014 ${dustLabel(c.pm10)}\n\\uD83D\\uDCA8 <b>PM2.5:</b> ${c.pm2_5} \\u00B5g/m\\u00B3\n\\uD83E\\uDDEA <b>Ozone:</b> ${c.ozone} \\u00B5g/m\\u00B3 \\u2014 ${ozoneLabel(c.ozone)}\n\\uD83C\\uDFDC <b>Dust:</b> ${c.dust} \\u00B5g/m\\u00B3 \\u2014 ${dustLabel(c.dust)}\n\n\\uD83C\\uDF3F <b>Pollen (grains/m\\u00B3)</b>\n\\uD83C\\uDF33 <b>Tree (Birch):</b> ${pollenLabel(c.birch_pollen)}\n\\uD83C\\uDF3E <b>Grass:</b> ${pollenLabel(c.grass_pollen)}\n\\uD83C\\uDF31 <b>Ragweed:</b> ${pollenLabel(c.ragweed_pollen)}\n\n\\u2139\\uFE0F Source: Open-Meteo (open-meteo.com)`;\n\nreturn [{ json: { message: msg, chatId } }];"
+        "url": "https://pollen.googleapis.com/v1/forecast:lookup",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GOOGLE_API_KEY"
+            },
+            {
+              "name": "location.latitude",
+              "value": "35.6528"
+            },
+            {
+              "name": "location.longitude",
+              "value": "-97.4781"
+            },
+            {
+              "name": "days",
+              "value": "1"
+            },
+            {
+              "name": "languageCode",
+              "value": "en"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f7e6d5c4-b3a2-4190-8e7f-1a2b3c4d5e6f",
+      "name": "Fetch Pollen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const aq = $('Fetch Air Quality').first().json;\nconst pollen = $('Fetch Pollen').first().json;\nconst chatId = '8113726432';\n\n// --- AQI ---\nconst indexes = aq.indexes || [];\nconst aqiEntry = indexes.find(i => i.code === 'usa_epa') || {};\nconst aqi = aqiEntry.aqi != null ? aqiEntry.aqi : 'N/A';\nconst aqiCategory = aqiEntry.category || 'Unknown';\n\n// --- Pollutants ---\nconst pollutantMap = {};\n(aq.pollutants || []).forEach(p => { pollutantMap[p.code] = p.concentration || {}; });\nconst pm25 = pollutantMap.pm25 && pollutantMap.pm25.value != null ? pollutantMap.pm25.value.toFixed(1) : 'N/A';\nconst pm10 = pollutantMap.pm10 && pollutantMap.pm10.value != null ? pollutantMap.pm10.value.toFixed(1) : 'N/A';\nconst o3 = pollutantMap.o3 && pollutantMap.o3.value != null ? pollutantMap.o3.value.toFixed(1) : 'N/A';\n\n// --- Pollen ---\nconst pollenMap = {};\n((pollen.dailyInfo || [])[0]?.pollenTypeInfo || []).forEach(p => { pollenMap[p.code] = p.indexInfo || {}; });\n\nconst catEmoji = (cat) => {\n  const m = { 'None': '\\u26AA', 'Very Low': '\\uD83D\\uDFE2', 'Low': '\\uD83D\\uDFE2', 'Moderate': '\\uD83D\\uDFE1', 'High': '\\uD83D\\uDFE0', 'Very High': '\\uD83D\\uDD34' };\n  return m[cat] || '\\u26AA';\n};\nconst pollenLabel = (info) => {\n  if (!info || info.value == null) return '\\u26AA N/A';\n  return catEmoji(info.category) + ' ' + (info.category || 'N/A') + ' (' + info.value + '/5)';\n};\nconst aqiEmoji = (cat) => {\n  const c = (cat || '').toLowerCase();\n  if (c.includes('good')) return '\\uD83D\\uDFE2 ' + cat;\n  if (c.includes('moderate')) return '\\uD83D\\uDFE1 ' + cat;\n  if (c.includes('sensitive')) return '\\uD83D\\uDFE0 ' + cat;\n  if (c.includes('very unhealthy')) return '\\uD83D\\uDFE3 ' + cat;\n  if (c.includes('unhealthy')) return '\\uD83D\\uDD34 ' + cat;\n  if (c.includes('hazardous')) return '\\u26AB ' + cat;\n  return '\\u26AA ' + cat;\n};\n\nconst today = new Date().toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'America/Chicago'\n});\n\nconst msg = '\\uD83C\\uDF24 <b>Air Quality Report \\u2014 ' + today + '</b>\\n\\uD83D\\uDCCD Oklahoma City, OK\\n\\n\\uD83C\\uDF0D <b>Overall AQI:</b> ' + aqi + ' \\u2014 ' + aqiEmoji(aqiCategory) + '\\n\\uD83D\\uDCA8 <b>PM2.5:</b> ' + pm25 + ' \\u00B5g/m\\u00B3\\n\\uD83C\\uDF2B <b>PM10:</b> ' + pm10 + ' \\u00B5g/m\\u00B3\\n\\uD83E\\uDDEA <b>Ozone:</b> ' + o3 + ' ppb\\n\\n\\uD83C\\uDF3F <b>Pollen (0\\u20135 scale)</b>\\n\\uD83C\\uDF33 <b>Tree:</b> ' + pollenLabel(pollenMap.TREE) + '\\n\\uD83C\\uDF3E <b>Grass:</b> ' + pollenLabel(pollenMap.GRASS) + '\\n\\uD83C\\uDF31 <b>Weed:</b> ' + pollenLabel(pollenMap.WEED) + '\\n\\n\\u2139\\uFE0F Source: Google Air Quality &amp; Pollen APIs';\n\nreturn [{ json: { message: msg, chatId } }];"
       },
       "id": "44b28590-1023-49e3-ac2a-9c168aea9d4f",
       "name": "Format Message",
@@ -108,6 +140,17 @@
       ]
     },
     "Fetch Air Quality": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pollen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pollen": {
       "main": [
         [
           {

@@ -1,0 +1,206 @@
+{
+  "id": "airquality-ondemand-v1",
+  "name": "Air Quality On Demand",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "b1a2c3d4-e5f6-7890-abcd-ef0123456789",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "d7e8f901-2345-6789-abcd-ef0123456789",
+      "credentials": {
+        "telegramApi": {
+          "id": "DvwBL0I3TNJNTrni",
+          "name": "MJ_outdoor"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json.message || {};\nconst chatId = String(msg.chat?.id || '');\nconst rawText = (msg.text || '').trim().replace(/^\\/\\w+\\s*/, '').trim();\n\nconst coordMatch = rawText.match(/^(-?\\d+\\.?\\d*),\\s*(-?\\d+\\.?\\d*)$/);\n\nif (coordMatch) {\n  return [{ json: {\n    chatId,\n    lat: parseFloat(coordMatch[1]),\n    lng: parseFloat(coordMatch[2]),\n    locationLabel: coordMatch[1].trim() + ', ' + coordMatch[2].trim(),\n    needsGeocode: false\n  }}];\n} else if (rawText && rawText.length > 1) {\n  return [{ json: {\n    chatId,\n    cityQuery: rawText,\n    lat: null,\n    lng: null,\n    locationLabel: rawText,\n    needsGeocode: true\n  }}];\n} else {\n  return [{ json: {\n    chatId,\n    lat: 35.6528,\n    lng: -97.4781,\n    locationLabel: 'Oklahoma City, OK',\n    needsGeocode: false\n  }}];\n}"
+      },
+      "id": "c2b3d4e5-f6a7-8901-bcde-f01234567890",
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needsGeocode }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0000-1111-2222-333344445555",
+      "name": "IF Needs Geocode",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://nominatim.openstreetmap.org/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "q", "value": "={{ $json.cityQuery }}"},
+            {"name": "format", "value": "json"},
+            {"name": "limit", "value": "1"}
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "User-Agent", "value": "AirQualityBot/1.0"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0000-1111-2222-333344445555",
+      "name": "Geocode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "const geoRaw = $input.first().json;\nconst geoArr = Array.isArray(geoRaw) ? geoRaw : [geoRaw];\nconst result = geoArr[0];\nconst parsed = $('Parse Input').first().json;\nconst chatId = parsed.chatId;\n\nif (result && result.lat) {\n  return [{ json: {\n    chatId,\n    lat: parseFloat(result.lat),\n    lng: parseFloat(result.lon),\n    locationLabel: result.display_name\n  }}];\n}\n\nreturn [{ json: {\n  chatId,\n  lat: 35.6528,\n  lng: -97.4781,\n  locationLabel: 'Oklahoma City, OK (location not found)'\n}}];"
+      },
+      "id": "c3d4e5f6-0000-1111-2222-333344445555",
+      "name": "Set Coords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://airquality.googleapis.com/v1/currentConditions:lookup",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "key", "value": "YOUR_GOOGLE_API_KEY"}
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({location: {latitude: $json.lat, longitude: $json.lng}, extraComputations: ['POLLUTANT_CONCENTRATION', 'LOCAL_AQI'], languageCode: 'en'}) }}",
+        "options": {}
+      },
+      "id": "d3c4e5f6-a7b8-9012-cdef-012345678901",
+      "name": "Fetch Air Quality",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "let lat, lng, chatId, locationLabel;\n\ntry {\n  const sc = $('Set Coords').first().json;\n  if (sc && sc.lat != null) {\n    lat = sc.lat; lng = sc.lng; chatId = sc.chatId; locationLabel = sc.locationLabel;\n  }\n} catch(e) {}\n\nif (lat == null) {\n  const pi = $('Parse Input').first().json;\n  lat = pi.lat; lng = pi.lng; chatId = pi.chatId; locationLabel = pi.locationLabel;\n}\n\nreturn [{ json: { lat, lng, chatId, locationLabel } }];"
+      },
+      "id": "d4e5f6a7-0000-1111-2222-333344445555",
+      "name": "Resolve Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://pollen.googleapis.com/v1/forecast:lookup",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "key", "value": "YOUR_GOOGLE_API_KEY"},
+            {"name": "location.latitude", "value": "={{ $json.lat }}"},
+            {"name": "location.longitude", "value": "={{ $json.lng }}"},
+            {"name": "days", "value": "1"},
+            {"name": "languageCode", "value": "en"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "e4d5f6a7-b8c9-0123-defa-123456789012",
+      "name": "Fetch Pollen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const aq = $('Fetch Air Quality').first().json;\nconst pollen = $('Fetch Pollen').first().json;\nconst ctx = $('Resolve Context').first().json;\nconst chatId = ctx.chatId;\nconst locationLabel = ctx.locationLabel;\n\n// --- AQI ---\nconst indexes = aq.indexes || [];\nconst aqiEntry = indexes.find(i => i.code === 'usa_epa') || {};\nconst aqi = aqiEntry.aqi != null ? aqiEntry.aqi : 'N/A';\nconst aqiCategory = aqiEntry.category || 'Unknown';\n\n// --- Pollutants ---\nconst pollutantMap = {};\n(aq.pollutants || []).forEach(p => { pollutantMap[p.code] = p.concentration || {}; });\nconst pm25 = pollutantMap.pm25 && pollutantMap.pm25.value != null ? pollutantMap.pm25.value.toFixed(1) : 'N/A';\nconst pm10 = pollutantMap.pm10 && pollutantMap.pm10.value != null ? pollutantMap.pm10.value.toFixed(1) : 'N/A';\nconst o3 = pollutantMap.o3 && pollutantMap.o3.value != null ? pollutantMap.o3.value.toFixed(1) : 'N/A';\n\n// --- Pollen ---\nconst pollenMap = {};\n((pollen.dailyInfo || [])[0]?.pollenTypeInfo || []).forEach(p => { pollenMap[p.code] = p.indexInfo || {}; });\n\nconst catEmoji = (cat) => {\n  const m = { 'None': '\\u26AA', 'Very Low': '\\uD83D\\uDFE2', 'Low': '\\uD83D\\uDFE2', 'Moderate': '\\uD83D\\uDFE1', 'High': '\\uD83D\\uDFE0', 'Very High': '\\uD83D\\uDD34' };\n  return m[cat] || '\\u26AA';\n};\nconst pollenLabel = (info) => {\n  if (!info || info.value == null) return '\\u26AA N/A';\n  return catEmoji(info.category) + ' ' + (info.category || 'N/A') + ' (' + info.value + '/5)';\n};\nconst aqiEmoji = (cat) => {\n  const c = (cat || '').toLowerCase();\n  if (c.includes('good')) return '\\uD83D\\uDFE2 ' + cat;\n  if (c.includes('moderate')) return '\\uD83D\\uDFE1 ' + cat;\n  if (c.includes('sensitive')) return '\\uD83D\\uDFE0 ' + cat;\n  if (c.includes('very unhealthy')) return '\\uD83D\\uDFE3 ' + cat;\n  if (c.includes('unhealthy')) return '\\uD83D\\uDD34 ' + cat;\n  if (c.includes('hazardous')) return '\\u26AB ' + cat;\n  return '\\u26AA ' + cat;\n};\n\nconst today = new Date().toLocaleDateString('en-US', {\n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',\n  timeZone: 'America/Chicago'\n});\n\nconst msg = '\\uD83C\\uDF24 <b>Air Quality Report \\u2014 ' + today + '</b>\\n\\uD83D\\uDCCD ' + locationLabel + '\\n\\n\\uD83C\\uDF0D <b>Overall AQI:</b> ' + aqi + ' \\u2014 ' + aqiEmoji(aqiCategory) + '\\n\\uD83D\\uDCA8 <b>PM2.5:</b> ' + pm25 + ' \\u00B5g/m\\u00B3\\n\\uD83C\\uDF2B <b>PM10:</b> ' + pm10 + ' \\u00B5g/m\\u00B3\\n\\uD83E\\uDDEA <b>Ozone:</b> ' + o3 + ' ppb\\n\\n\\uD83C\\uDF3F <b>Pollen (0\\u20135 scale)</b>\\n\\uD83C\\uDF33 <b>Tree:</b> ' + pollenLabel(pollenMap.TREE) + '\\n\\uD83C\\uDF3E <b>Grass:</b> ' + pollenLabel(pollenMap.GRASS) + '\\n\\uD83C\\uDF31 <b>Weed:</b> ' + pollenLabel(pollenMap.WEED) + '\\n\\n\\u2139\\uFE0F Source: Google Air Quality &amp; Pollen APIs';\n\nreturn [{ json: { message: msg, chatId } }];"
+      },
+      "id": "f5e6a7b8-c9d0-1234-efab-234567890123",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {"parse_mode": "HTML"}
+      },
+      "id": "a6f7b8c9-d0e1-2345-fabc-345678901234",
+      "name": "Send Telegram Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2400, 300],
+      "webhookId": "e8f90123-4567-89ab-cdef-012345678901",
+      "credentials": {
+        "telegramApi": {
+          "id": "DvwBL0I3TNJNTrni",
+          "name": "MJ_outdoor"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{"node": "Parse Input", "type": "main", "index": 0}]]
+    },
+    "Parse Input": {
+      "main": [[{"node": "IF Needs Geocode", "type": "main", "index": 0}]]
+    },
+    "IF Needs Geocode": {
+      "main": [
+        [{"node": "Geocode", "type": "main", "index": 0}],
+        [{"node": "Fetch Air Quality", "type": "main", "index": 0}]
+      ]
+    },
+    "Geocode": {
+      "main": [[{"node": "Set Coords", "type": "main", "index": 0}]]
+    },
+    "Set Coords": {
+      "main": [[{"node": "Fetch Air Quality", "type": "main", "index": 0}]]
+    },
+    "Fetch Air Quality": {
+      "main": [[{"node": "Resolve Context", "type": "main", "index": 0}]]
+    },
+    "Resolve Context": {
+      "main": [[{"node": "Fetch Pollen", "type": "main", "index": 0}]]
+    },
+    "Fetch Pollen": {
+      "main": [[{"node": "Format Message", "type": "main", "index": 0}]]
+    },
+    "Format Message": {
+      "main": [[{"node": "Send Telegram Message", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago",
+    "availableInMCP": false
+  }
+}
