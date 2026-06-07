@@ -1,0 +1,304 @@
+{
+  "updatedAt": "2026-06-07T20:02:07.745Z",
+  "createdAt": "2026-06-07T20:02:07.745Z",
+  "id": "30faaca8-bb34-40c8-8eea-d7f25e7dd448",
+  "name": "Core Facility Time-Off Notifier",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "cft01",
+      "name": "7am Weekdays",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        100,
+        300
+      ],
+      "notes": "Runs Mon–Fri at 7 AM. Change to '0 7 * * *' to include weekends."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://slack.com/api/conversations.history",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "channel",
+              "value": "C0B8SPZLPUM"
+            },
+            {
+              "name": "oldest",
+              "value": "={{ String(Math.floor((Date.now() - 86400000) / 1000)) }}"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cft02",
+      "name": "Get Channel History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "home-n8n bot"
+        }
+      },
+      "notes": "Fetches last 24h of messages from #core-facility-calendar (C0B8SPZLPUM).\nBot must be a member of the channel. Uses home-n8n bot credential."
+    },
+    {
+      "parameters": {
+        "jsCode": "const messages = $input.first().json.messages || [];\n\n// Outlook Calendar bot messages have subtype='bot_message' or a bot_id\nconst botMsgs = messages.filter(m => m.bot_id || m.subtype === 'bot_message');\nif (botMsgs.length === 0) return []; // no bot posts today — stop\n\n// Parse all lines matching: 'Name off  (email@domain.com)'\nconst pattern = /^(.+?)\\s+off\\s*\\(([^)]+@[^)]+)\\)/gm;\nconst absences = [];\n\nfor (const msg of botMsgs) {\n  const text = (msg.text || '').trim();\n  let match;\n  pattern.lastIndex = 0;\n  while ((match = pattern.exec(text)) !== null) {\n    const name  = match[1].trim();\n    const email = match[2].trim();\n    if (!absences.find(a => a.email === email)) {\n      absences.push({ name, email });\n    }\n  }\n}\n\nif (absences.length === 0) return []; // nobody off today — stop\n\nreturn [{ json: { absences } }];"
+      },
+      "id": "cft03",
+      "name": "Parse Absences",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        300
+      ],
+      "notes": "Looks for lines like 'Name off  (member1@example.com)'.\nReturns empty array (stops pipeline) if no absences found."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Toggle this flag ─────────────────────────────────────────\nconst TEST_MODE = true;  // true = only Team Member 1 gets emails; false = everyone\n// ─────────────────────────────────────────────────────────────\n\nconst everyone = [\n  { name: 'Team Member 1', email: 'member1@example.com' },\n  { name: 'Team Member 2',       email: 'member2@example.com' },\n  { name: 'Team Member 3',      email: 'member3@example.com' },\n  { name: 'Team Member 4',         email: 'member4@example.com' }\n];\n\nconst team = TEST_MODE\n  ? [{ name: 'Team Member 1', email: 'member1@example.com' }]\n  : everyone;\n\nconst absences = $('Parse Absences').first().json.absences;\nreturn [{ json: { team, absences } }];"
+      },
+      "id": "cft04",
+      "name": "Team Members",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        300
+      ],
+      "notes": "TEST_MODE = true → only Team Member 1 gets emails.\nSet TEST_MODE = false to enable all 4 recipients."
+    },
+    {
+      "parameters": {
+        "jsCode": "const { team, absences } = $input.first().json;\n\n// Persistent dedup store — prevents duplicate emails if run more than once\nconst store = $getWorkflowStaticData('global');\nif (!store.sent) store.sent = {};\n\n// Prune entries older than 48 hours\nconst cutoff = Date.now() - 48 * 3600 * 1000;\nfor (const k of Object.keys(store.sent)) {\n  if (store.sent[k] < cutoff) delete store.sent[k];\n}\n\nconst now = new Date();\nconst days   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];\nconst months = ['January','February','March','April','May','June',\n                 'July','August','September','October','November','December'];\nconst todayLabel = `${days[now.getDay()]}, ${months[now.getMonth()]} ${now.getDate()}`;\nconst todayKey   = now.toISOString().slice(0, 10);\n\nconst items = [];\nfor (const absence of absences) {\n  const dedupKey = `${absence.email}::${todayKey}`;\n  if (store.sent[dedupKey]) continue; // already emailed today for this person\n  items.push({ json: { absence, team, todayLabel, dedupKey } });\n}\n\n// Returning multiple items = one email per absent person\nreturn items;"
+      },
+      "id": "cft05",
+      "name": "Dedup & Split",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        300
+      ],
+      "notes": "One output item per new absence. Empty output stops the pipeline (no emails)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const { absence, team, todayLabel, dedupKey } = $input.first().json;\n\nconst subject = `[Core Facility] ${absence.name} is out today — ${todayLabel}`;\n\nconst html = [\n  '<p style=\"font-family:sans-serif;margin:0 0 12px\">Hi team,</p>',\n  '<p style=\"font-family:sans-serif;margin:0 0 12px\">',\n  `This is a reminder that <strong>${absence.name}</strong> is `,\n  `<strong>out of office today, ${todayLabel}</strong>.`,\n  '</p>',\n  '<p style=\"font-family:sans-serif;margin:0 0 12px;color:#555\">',\n  'Please plan accordingly and reach out to other team members if you need assistance.',\n  '</p>',\n  '<hr style=\"border:none;border-top:1px solid #e0e0e0;margin:20px 0\">',\n  '<p style=\"font-family:sans-serif;color:#aaa;font-size:0.8em;margin:0\">',\n  'Core Facility Calendar &bull; Automated notification via n8n',\n  '</p>'\n].join('');\n\n// Send to all team members as a comma-separated list\nconst toList = team.map(m => m.email).join(',');\n\nreturn [{ json: { subject, html, toList, dedupKey } }];"
+      },
+      "id": "cft06",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "toList": "={{ $json.toList }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "cft07",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1420,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      },
+      "notes": "Replace YOUR_GMAIL_CREDENTIAL_ID with your Gmail credential ID from n8n.\nThe email is sent to ALL team members in the toList field."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Record that this person's absence was notified today\nconst store = $getWorkflowStaticData('global');\nif (!store.sent) store.sent = {};\nstore.sent[$json.dedupKey] = Date.now();\nreturn [{ json: { ok: true, key: $json.dedupKey } }];"
+      },
+      "id": "cft08",
+      "name": "Mark Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "7am Weekdays": {
+      "main": [
+        [
+          {
+            "node": "Get Channel History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Channel History": {
+      "main": [
+        [
+          {
+            "node": "Parse Absences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Absences": {
+      "main": [
+        [
+          {
+            "node": "Team Members",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Team Members": {
+      "main": [
+        [
+          {
+            "node": "Dedup & Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup & Split": {
+      "main": [
+        [
+          {
+            "node": "Build Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Gmail": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "versionId": "9499b246-e604-4a4f-8f34-cb42513076c9",
+  "activeVersionId": "9499b246-e604-4a4f-8f34-cb42513076c9",
+  "versionCounter": 7,
+  "triggerCount": 1,
+  "tags": [
+    {
+      "updatedAt": "2026-06-07T20:02:07.764Z",
+      "createdAt": "2026-06-07T20:02:07.764Z",
+      "id": "7dsdxeOck2csveUp",
+      "name": "email"
+    },
+    {
+      "updatedAt": "2026-06-07T20:02:07.767Z",
+      "createdAt": "2026-06-07T20:02:07.767Z",
+      "id": "liK09hCLCYFkyrHM",
+      "name": "gmail"
+    },
+    {
+      "updatedAt": "2026-06-07T20:02:07.760Z",
+      "createdAt": "2026-06-07T20:02:07.760Z",
+      "id": "rS61NNAjI6bDarQd",
+      "name": "calendar"
+    },
+    {
+      "updatedAt": "2026-06-07T20:02:07.765Z",
+      "createdAt": "2026-06-07T20:02:07.765Z",
+      "id": "uCUeirpw8MMReW3p",
+      "name": "slack"
+    }
+  ],
+  "shared": [
+    {
+      "updatedAt": "2026-06-07T20:02:07.750Z",
+      "createdAt": "2026-06-07T20:02:07.750Z",
+      "role": "workflow:owner",
+      "workflowId": "30faaca8-bb34-40c8-8eea-d7f25e7dd448",
+      "projectId": "L9CrkxWS66p1kIF9",
+      "project": {
+        "updatedAt": "2026-05-28T01:42:03.043Z",
+        "createdAt": "2026-02-28T15:27:11.789Z",
+        "id": "L9CrkxWS66p1kIF9",
+        "name": "Team Member 1 <notifier@example.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "22c1b8ff-1848-44eb-9580-c76af665bacf"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}
