@@ -7,7 +7,7 @@ A collection of production n8n automation workflows — AI research assistants, 
 ## Workflows
 
 ### Smart Research Agent
-**File:** `Smart_Research_Agent.json`
+**File:** `flows/Smart_Research_Agent.json`
 
 An AI agent (Claude claude-sonnet-4-6) that decides how to answer — directly from its knowledge, or by calling one of three tools: web search, India news, or deep page research. Supports voice notes via Whisper transcription. Maintains per-chat conversation memory.
 
@@ -20,7 +20,7 @@ An AI agent (Claude claude-sonnet-4-6) that decides how to answer — directly f
 ---
 
 ### Voice Research Bot
-**File:** `Voice_Research_Bot.json`
+**File:** `flows/Voice_Research_Bot.json`
 
 Accepts Telegram voice notes or text. Transcribes audio via OpenAI Whisper, runs a Google web search, and returns either a 3–5 bullet summary (normal mode) or a detailed answer from scraped pages (deep mode, triggered by keywords like "go deeper", "elaborate").
 
@@ -31,7 +31,7 @@ Accepts Telegram voice notes or text. Transcribes audio via OpenAI Whisper, runs
 ---
 
 ### Research Assistant
-**File:** `Research_Assistant.json`
+**File:** `flows/Research_Assistant.json`
 
 Routes queries to general web search (SerpAPI + Brave Search) or India news (SerpAPI Google News + NewsData.io) based on message prefix (`india:` prefix → India route). Summarizes results into 3–5 bullet points.
 
@@ -42,7 +42,7 @@ Routes queries to general web search (SerpAPI + Brave Search) or India news (Ser
 ---
 
 ### Daily Air Quality Bot
-**File:** `Daily_Air_Quality_Report.json`
+**File:** `flows/Daily_Air_Quality_Report.json`
 
 On-demand Telegram bot that fetches real-time air quality data (Open-Meteo) and pollen levels (Ambee API — tree, grass, weed) and sends a formatted report to the requesting chat.
 
@@ -52,7 +52,7 @@ On-demand Telegram bot that fetches real-time air quality data (Open-Meteo) and 
 ---
 
 ### TN News Digest
-**File:** `TN_news.json`
+**File:** `flows/TN_news.json`
 
 Fetches the top 10 Tamil Nadu news articles and sends them as a Telegram media album — each article as an image with title, source, and link. Falls back to a text list if images are unavailable.
 
@@ -62,7 +62,7 @@ Fetches the top 10 Tamil Nadu news articles and sends them as a Telegram media a
 ---
 
 ### Slack to Asana Task
-**File:** `Slack_to_asana_task.json`
+**File:** `flows/Slack_to_asana_task.json`
 
 Listens for a Slack trigger and creates a task in Asana with the message content.
 
@@ -72,7 +72,7 @@ Listens for a Slack trigger and creates a task in Asana with the message content
 ---
 
 ### Vendor Status Checker
-**File:** `Vendor_Status_Checker.json`
+**File:** `flows/Vendor_Status_Checker.json`
 
 Checks vendor status (workflow-specific logic) and reports results.
 
